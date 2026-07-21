@@ -1,5 +1,9 @@
 # quest-forge
 
+[![npm version](https://img.shields.io/npm/v/quest-forge.svg)](https://www.npmjs.com/package/quest-forge)
+[![CI](https://github.com/Koval09/quest-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/Koval09/quest-forge/actions)
+[![license](https://img.shields.io/github/license/Koval09/quest-forge.svg)](LICENSE)
+
 > Schema-first game content generator powered by Vercel AI SDK, Zod, and balance constraints.
 
 `quest-forge` helps game developers generate structured, perfectly balanced game content (quests, items, NPCs, loot tables). Instead of relying on raw LLM prompts that easily break structural rules or game balance, `quest-forge` combines Zod schemas with custom balance rules and an automatic iterative repair loop.
