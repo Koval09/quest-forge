@@ -29,23 +29,52 @@ npm install quest-forge zod ai
 
 ---
 
-## 60-Second Quick Start
+## CLI Usage & Output Modes
 
-Generate 10 valid quest objects using the CLI and an example schema:
+`quest-forge` CLI supports three output modes:
 
+### 1. Default (Human-Readable Terminal Cards)
+Outputs colorful formatted cards to stdout. Perfect for quick local inspection:
 ```bash
-# Set your API key
-export OPENAI_API_KEY="your-openai-api-key"
+npx quest-forge generate \
+  --schema ./examples/quest.schema.ts \
+  --count 5 \
+  --param level=5 \
+  --model openai:gpt-4o-mini
+```
 
-# Generate 10 quests with level and theme parameters
+### 2. File Output (`--out`)
+Saves a formatted JSON array to a file:
+```bash
 npx quest-forge generate \
   --schema ./examples/quest.schema.ts \
   --count 10 \
-  --param level=5 \
-  --param theme=dark_forest \
-  --model openai:gpt-4o-mini \
-  --out quests.json
+  --out quests.json \
+  --model openai:gpt-4o-mini
 ```
+
+### 3. Raw JSON Stream (`--json`)
+Outputs a JSON array directly to stdout for shell pipes (e.g. `jq`):
+```bash
+npx quest-forge generate \
+  --schema ./examples/quest.schema.ts \
+  --count 5 \
+  --json \
+  --model openai:gpt-4o-mini | jq '.[] | .title'
+```
+
+### CLI Options
+
+| Flag | Short | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--schema` | `-s` | Path to `.ts`/`.js` Zod schema file | Required |
+| `--count` | `-c` | Number of items to generate | `1` |
+| `--out` | `-o` | Output JSON file path | — |
+| `--json` | — | Output raw JSON array to `stdout` | `false` |
+| `--model` | `-m` | Provider and model (`openai:gpt-4o-mini`, `anthropic:claude-3-5-sonnet-20241022`) | — |
+| `--param` | `-p` | Generation parameters (`key=value`, repeatable) | `{}` |
+| `--concurrency` | — | Parallel generation worker limit | `3` |
+| `--temperature` | `-t` | Model sampling temperature (`0` to `2`) | Model default |
 
 ---
 
@@ -75,6 +104,7 @@ const generator = defineGenerator({
     }),
   ],
   model: openai("gpt-4o-mini"),
+  temperature: 0.7,
   maxRepairs: 3,
 });
 ```
@@ -92,6 +122,7 @@ console.log(quest);
 const { items, failures } = await generator.generateBatch({
   count: 20,
   concurrency: 3,
+  temperature: 0.8,
   params: { level: 5 },
   onProgress: ({ completed, total }) => {
     console.log(`Generated ${completed}/${total}...`);
@@ -154,6 +185,9 @@ To guarantee fast, deterministic, offline CI builds without requiring real API k
 
 ### 3. What happens if an item reaches `maxRepairs`?
 If an item fails validation after `maxRepairs` (e.g. 3 repairs = 4 total attempts), it is added to the `failures` array in `generateBatch` without aborting the rest of the batch. In single `generate()`, a `GenerationError` is thrown.
+
+### 4. What concurrency setting should I use for duplicate prevention?
+While higher concurrency speeds up generation, concurrent tasks generate items simultaneously without knowing what names other active workers will choose. If your schema requires unique `name` or `title` fields across a batch, keep `concurrency` around `1-3`. This ensures accepted names are added to `avoidNames` immediately after each item completes, minimizing duplicate collisions.
 
 ---
 

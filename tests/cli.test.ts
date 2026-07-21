@@ -160,7 +160,7 @@ describe("CLI module", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    it("outputs JSON to stdout when --out is omitted", async () => {
+    it("outputs JSON to stdout when --json is provided", async () => {
       const { MockLanguageModelV1 } = await import("ai/test");
       const mockModel = new MockLanguageModelV1({
         defaultObjectGenerationMode: "json",
@@ -188,6 +188,7 @@ describe("CLI module", () => {
             schema: schemaPath,
             count: 1,
             concurrency: 1,
+            json: true,
           },
           mockModel
         );
@@ -200,7 +201,7 @@ describe("CLI module", () => {
       expect(parsed[0].name).toBe("Stdout Quest");
     });
 
-    it("sets process.exitCode = 1 when all batch items fail generation", async () => {
+    it("renders cards to stdout by default (no --out, no --json) with flattened nested fields", async () => {
       const { MockLanguageModelV1 } = await import("ai/test");
       const mockModel = new MockLanguageModelV1({
         defaultObjectGenerationMode: "json",
@@ -208,7 +209,63 @@ describe("CLI module", () => {
           rawCall: { rawPrompt: null, rawSettings: {} },
           finishReason: "stop",
           usage: { promptTokens: 10, completionTokens: 20 },
-          text: JSON.stringify({ title: "Quest", level: 999 }), // fails range [1, 10] constraint
+          text: JSON.stringify({
+            title: "Card Quest",
+            description: "A quest",
+            requiredLevel: 5,
+            difficulty: "medium",
+            reward: { gold: 150, experience: 300, itemRarity: "rare" },
+          }),
+        }),
+      });
+
+      const schemaPath = path.resolve(__dirname, "../examples/quest.schema.ts");
+      const { runGenerateAction } = await import("../src/cli/generate.js");
+
+      let stdoutText = "";
+      const originalStdoutWrite = process.stdout.write;
+      process.stdout.write = (chunk: unknown) => {
+        stdoutText += String(chunk);
+        return true;
+      };
+
+      const originalNoColor = process.env.NO_COLOR;
+      process.env.NO_COLOR = "1";
+
+      try {
+        await runGenerateAction(
+          {
+            schema: schemaPath,
+            count: 1,
+            concurrency: 1,
+            param: { level: 5 },
+          },
+          mockModel
+        );
+      } finally {
+        process.stdout.write = originalStdoutWrite;
+        if (originalNoColor === undefined) {
+          delete process.env.NO_COLOR;
+        } else {
+          process.env.NO_COLOR = originalNoColor;
+        }
+      }
+
+      expect(stdoutText).toContain("#1: Card Quest");
+      expect(stdoutText).toContain("requiredLevel: 5");
+      expect(stdoutText).toContain("reward.gold: 150");
+      expect(stdoutText).toContain("reward.experience: 300");
+    });
+
+    it("writes progress and summary with failures to stderr, setting process.exitCode = 1 on total failure", async () => {
+      const { MockLanguageModelV1 } = await import("ai/test");
+      const mockModel = new MockLanguageModelV1({
+        defaultObjectGenerationMode: "json",
+        doGenerate: async () => ({
+          rawCall: { rawPrompt: null, rawSettings: {} },
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 20 },
+          text: JSON.stringify({ title: "Invalid Quest", level: 999 }), // fails range [1, 10]
         }),
       });
 
@@ -217,6 +274,13 @@ describe("CLI module", () => {
 
       const originalExitCode = process.exitCode;
       process.exitCode = undefined;
+
+      let stderrText = "";
+      const originalStderrWrite = process.stderr.write;
+      process.stderr.write = (chunk: unknown) => {
+        stderrText += String(chunk);
+        return true;
+      };
 
       try {
         await runGenerateAction(
@@ -231,7 +295,14 @@ describe("CLI module", () => {
         expect(process.exitCode).toBe(1);
       } finally {
         process.exitCode = originalExitCode;
+        process.stderr.write = originalStderrWrite;
       }
+
+      expect(stderrText).toContain("Generating 1/2");
+      expect(stderrText).toContain("Generated 0/2 (2 failed)");
+      expect(stderrText).toContain("Item #0");
+      expect(stderrText).toContain("Item #1");
+      expect(stderrText).toContain("range error on");
     });
   });
 });
