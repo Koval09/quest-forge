@@ -1,0 +1,49 @@
+{
+  "name": "quest-forge",
+  "version": "0.1.0",
+  "description": "Schema-first game content generator powered by Vercel AI SDK",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "quest-forge": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npx --no-install tsup",
+    "test": "npx --no-install vitest run",
+    "typecheck": "npx --no-install tsc --noEmit",
+    "lint": "npx --no-install eslint ."
+  },
+  "dependencies": {
+    "ai": "^4.1.0",
+    "commander": "^13.1.0",
+    "jiti": "^2.4.2",
+    "p-limit": "^6.2.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "eslint": "^9.20.1",
+    "tsup": "^8.3.6",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.5"
+  }
+}
