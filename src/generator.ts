@@ -1,7 +1,7 @@
 import { generateObject, NoObjectGeneratedError, type LanguageModel } from "ai";
 import { z } from "zod";
 import { getByPath, validateConstraints } from "./constraints.js";
-import { buildPrompt } from "./prompt.js";
+import { buildPrompt, buildRepairPrompt } from "./prompt.js";
 import { Constraint, ValidationIssue } from "./types.js";
 
 export class GenerationError extends Error {
@@ -77,7 +77,9 @@ export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
       );
     }
 
-    const prompt = buildPrompt({
+    const maxRepairs = this.options.maxRepairs ?? 3;
+
+    let currentPrompt = buildPrompt({
       schema: this.options.schema,
       examples: this.options.examples,
       params,
@@ -85,116 +87,116 @@ export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
       systemPrompt: this.options.systemPrompt,
     });
 
-    try {
-      const result = await generateObject({
-        model: activeModel,
-        schema: this.options.schema,
-        prompt,
-      });
+    let totalAttempts = 0;
+    let lastObject: unknown = undefined;
+    let lastIssues: ValidationIssue[] = [];
 
-      const parsed = this.options.schema.safeParse(result.object);
-      if (!parsed.success) {
-        const issues = convertZodErrorToIssues(parsed.error, result.object);
-        throw new GenerationError({
-          attempts: 1,
-          lastObject: result.object,
-          errors: issues,
+    for (let repairAttempt = 0; repairAttempt <= maxRepairs; repairAttempt++) {
+      totalAttempts++;
+
+      try {
+        const result = await generateObject({
+          model: activeModel,
+          schema: this.options.schema,
+          prompt: currentPrompt,
         });
-      }
 
-      const constraintIssues = validateConstraints(
-        parsed.data,
-        (this.options.constraints as Constraint[]) || [],
-        params
-      );
+        lastObject = result.object;
 
-      if (constraintIssues.length > 0) {
-        throw new GenerationError({
-          attempts: 1,
-          lastObject: parsed.data,
-          errors: constraintIssues,
-        });
-      }
-
-      return parsed.data;
-    } catch (err: unknown) {
-      if (err instanceof GenerationError) {
-        throw err;
-      }
-
-      if (NoObjectGeneratedError.isInstance(err)) {
-        let rawObj: unknown = undefined;
-        if (err.text) {
-          try {
-            rawObj = JSON.parse(err.text);
-          } catch {
-            rawObj = err.text;
-          }
-        }
-
-        let issues: ValidationIssue[] = [];
-
-        const cause = err.cause;
-        if (cause instanceof z.ZodError) {
-          issues = convertZodErrorToIssues(cause, rawObj);
-        } else if (
-          cause &&
-          typeof cause === "object" &&
-          "issues" in cause &&
-          Array.isArray((cause as { issues: unknown[] }).issues)
-        ) {
-          issues = convertZodErrorToIssues(cause as z.ZodError, rawObj);
-        } else if (
-          cause &&
-          typeof cause === "object" &&
-          "cause" in cause &&
-          (cause as { cause: unknown }).cause instanceof z.ZodError
-        ) {
-          issues = convertZodErrorToIssues(
-            (cause as { cause: z.ZodError }).cause,
-            rawObj
-          );
+        const parsed = this.options.schema.safeParse(result.object);
+        if (!parsed.success) {
+          lastIssues = convertZodErrorToIssues(parsed.error, result.object);
         } else {
-          issues = [
-            {
-              path: "",
-              rule: "no_object_generated",
-              currentValue: rawObj,
-              allowed: err.message,
-            },
-          ];
+          const constraintIssues = validateConstraints(
+            parsed.data,
+            (this.options.constraints as Constraint[]) || [],
+            params
+          );
+
+          if (constraintIssues.length === 0) {
+            return parsed.data;
+          }
+
+          lastIssues = constraintIssues;
+        }
+      } catch (err: unknown) {
+        if (err instanceof GenerationError) {
+          throw err;
         }
 
-        throw new GenerationError({
-          attempts: 1,
-          lastObject: rawObj,
-          errors: issues,
-        });
+        if (NoObjectGeneratedError.isInstance(err)) {
+          if (err.text) {
+            try {
+              lastObject = JSON.parse(err.text);
+            } catch {
+              lastObject = err.text;
+            }
+          } else {
+            lastObject = undefined;
+          }
+
+          const cause = err.cause;
+          if (cause instanceof z.ZodError) {
+            lastIssues = convertZodErrorToIssues(cause, lastObject);
+          } else if (
+            cause &&
+            typeof cause === "object" &&
+            "issues" in cause &&
+            Array.isArray((cause as { issues: unknown[] }).issues)
+          ) {
+            lastIssues = convertZodErrorToIssues(cause as z.ZodError, lastObject);
+          } else if (
+            cause &&
+            typeof cause === "object" &&
+            "cause" in cause &&
+            (cause as { cause: unknown }).cause instanceof z.ZodError
+          ) {
+            lastIssues = convertZodErrorToIssues(
+              (cause as { cause: z.ZodError }).cause,
+              lastObject
+            );
+          } else {
+            lastIssues = [
+              {
+                path: "",
+                rule: "no_object_generated",
+                currentValue: lastObject,
+                allowed: err.message,
+              },
+            ];
+          }
+        } else if (
+          err &&
+          typeof err === "object" &&
+          "cause" in err &&
+          (err as { cause: unknown }).cause instanceof z.ZodError
+        ) {
+          const zodErr = (err as { cause: z.ZodError }).cause;
+          lastObject =
+            "value" in err
+              ? (err as { value: unknown }).value
+              : "text" in err
+                ? (err as { text: unknown }).text
+                : undefined;
+          lastIssues = convertZodErrorToIssues(zodErr, lastObject);
+        } else {
+          throw err;
+        }
       }
 
-      if (
-        err &&
-        typeof err === "object" &&
-        "cause" in err &&
-        (err as { cause: unknown }).cause instanceof z.ZodError
-      ) {
-        const zodErr = (err as { cause: z.ZodError }).cause;
-        const rawObj =
-          "value" in err
-            ? (err as { value: unknown }).value
-            : "text" in err
-              ? (err as { text: unknown }).text
-              : undefined;
-        const issues = convertZodErrorToIssues(zodErr, rawObj);
-        throw new GenerationError({
-          attempts: 1,
-          lastObject: rawObj,
-          errors: issues,
+      if (repairAttempt < maxRepairs) {
+        currentPrompt = buildRepairPrompt({
+          previousObject: lastObject,
+          issues: lastIssues,
         });
       }
-
-      throw err;
     }
+
+    throw new GenerationError({
+      attempts: totalAttempts,
+      lastObject,
+      errors: lastIssues,
+    });
   }
 }
 
