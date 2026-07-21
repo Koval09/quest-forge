@@ -337,4 +337,34 @@ describe("Generator module", () => {
       }
     });
   });
+
+  describe("temperature option", () => {
+    it("passes temperature to generateObject model call", async () => {
+      let lastTemperature: number | undefined;
+      const mockModel = new MockLanguageModelV1({
+        defaultObjectGenerationMode: "json",
+        doGenerate: async (options) => {
+          lastTemperature = options.temperature;
+          return {
+            rawCall: { rawPrompt: null, rawSettings: {} },
+            finishReason: "stop",
+            usage: { promptTokens: 10, completionTokens: 20 },
+            text: JSON.stringify({ title: "Quest 1", level: 5 }),
+          };
+        },
+      });
+
+      const generator = defineGenerator({
+        schema: z.object({ title: z.string(), level: z.number() }),
+        model: mockModel,
+        temperature: 0.8,
+      });
+
+      await generator.generate();
+      expect(lastTemperature).toBe(0.8);
+
+      await generator.generate({}, { temperature: 0.2 });
+      expect(lastTemperature).toBe(0.2);
+    });
+  });
 });

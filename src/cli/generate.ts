@@ -52,6 +52,16 @@ export function collectParams(
   };
 }
 
+export function parseTemperature(value: string): number {
+  const parsed = parseFloat(value);
+  if (Number.isNaN(parsed) || parsed < 0 || parsed > 2) {
+    throw new InvalidArgumentError(
+      `Option --temperature must be a number between 0 and 2, received "${value}".`
+    );
+  }
+  return parsed;
+}
+
 export interface CLIGenerateOptions {
   schema: string;
   count: number;
@@ -59,6 +69,7 @@ export interface CLIGenerateOptions {
   model?: string;
   param?: Record<string, unknown>;
   concurrency: number;
+  temperature?: number;
 }
 
 export async function runGenerateAction(
@@ -78,12 +89,14 @@ export async function runGenerateAction(
       constraints: schemaModule.constraints,
       examples: schemaModule.examples as unknown as Array<Partial<unknown>>,
       model,
+      temperature: options.temperature,
     });
 
     const batchResult = await generator.generateBatch({
       count: options.count,
       concurrency: options.concurrency,
       params: options.param,
+      temperature: options.temperature,
       onProgress: ({ completed, total }) => {
         process.stderr.write(`Generated ${completed}/${total}...\r`);
       },
@@ -149,6 +162,11 @@ export function createGenerateCommand(): Command {
       "Batch concurrency",
       (val) => parsePositiveInteger(val, "concurrency"),
       3
+    )
+    .option(
+      "-t, --temperature <number>",
+      "Sampling temperature between 0 and 2",
+      parseTemperature
     )
     .action(async (options: CLIGenerateOptions) => {
       await runGenerateAction(options);

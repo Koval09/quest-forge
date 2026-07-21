@@ -1,7 +1,7 @@
 import { InvalidArgumentError } from "commander";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { collectParams, parsePositiveInteger } from "../src/cli/generate.js";
+import { collectParams, parsePositiveInteger, parseTemperature } from "../src/cli/generate.js";
 import { loadSchemaFile } from "../src/cli/loader.js";
 import { resolveModel } from "../src/cli/model.js";
 
@@ -51,6 +51,21 @@ describe("CLI module", () => {
       expect(() => parsePositiveInteger("-5", "count")).toThrow(
         InvalidArgumentError
       );
+    });
+  });
+
+  describe("parseTemperature", () => {
+    it("parses valid numbers between 0 and 2", () => {
+      expect(parseTemperature("0")).toBe(0);
+      expect(parseTemperature("0.7")).toBe(0.7);
+      expect(parseTemperature("1.5")).toBe(1.5);
+      expect(parseTemperature("2")).toBe(2);
+    });
+
+    it("throws InvalidArgumentError for numbers < 0 or > 2 or non-numeric strings", () => {
+      expect(() => parseTemperature("-0.1")).toThrow(InvalidArgumentError);
+      expect(() => parseTemperature("2.1")).toThrow(InvalidArgumentError);
+      expect(() => parseTemperature("abc")).toThrow(InvalidArgumentError);
     });
   });
 

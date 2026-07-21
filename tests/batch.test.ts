@@ -187,10 +187,12 @@ describe("Batch generation module", () => {
 
   it("retries once when a duplicate name is produced, and marks failure if still duplicate", async () => {
     let callCount = 0;
+    const promptsReceived: string[] = [];
     const mockModel = new MockLanguageModelV1({
       defaultObjectGenerationMode: "json",
-      doGenerate: async () => {
+      doGenerate: async (options) => {
         callCount++;
+        promptsReceived.push(JSON.stringify(options.prompt));
         // Always returns "Same Name"
         return {
           rawCall: { rawPrompt: null, rawSettings: {} },
@@ -214,6 +216,12 @@ describe("Batch generation module", () => {
     expect(result.items).toHaveLength(1);
     expect(result.failures).toHaveLength(1);
     expect(result.failures[0]?.errors[0]?.rule).toBe("duplicate");
+
+    // The retry prompt (3rd call) must contain explicit duplicate warning with duplicate name
+    const retryPrompt = promptsReceived[2];
+    expect(retryPrompt).toContain(
+      "The title/name 'Same Name' is already taken. Choose a completely different name and setting."
+    );
   });
 
   it("preserves item order by task index even if tasks complete out of order", async () => {

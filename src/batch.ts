@@ -8,6 +8,7 @@ export interface GenerateBatchOptions {
   params?: Record<string, unknown>;
   onProgress?: (progress: { completed: number; total: number }) => void;
   model?: GenerateOptions["model"];
+  temperature?: number;
 }
 
 export interface BatchResult<T> {
@@ -26,7 +27,6 @@ function getItemName(item: unknown): string | null {
   return null;
 }
 
-
 export interface BatchGeneratorInterface<T = unknown> {
   generate(
     params?: Record<string, unknown>,
@@ -38,7 +38,7 @@ export async function generateBatch<T>(
   generator: BatchGeneratorInterface<T>,
   options: GenerateBatchOptions
 ): Promise<BatchResult<T>> {
-  const { count, concurrency = 3, params, onProgress, model } = options;
+  const { count, concurrency = 3, params, onProgress, model, temperature } = options;
 
   if (!Number.isInteger(concurrency) || concurrency < 1) {
     throw new Error(
@@ -63,6 +63,7 @@ export async function generateBatch<T>(
   const acceptedNames = new Set<string>();
 
   let completedCount = 0;
+  const isBatch = count > 1;
 
   const tasks = Array.from({ length: count }, (_, index) => {
     return limit(async () => {
@@ -70,15 +71,20 @@ export async function generateBatch<T>(
         let item = (await generator.generate(params, {
           avoidNames: Array.from(acceptedNames),
           model,
+          temperature,
+          isBatch,
         })) as T;
 
         let nameOrTitle = getItemName(item);
 
-        // Deduplication on output: if name collides, retry once with updated avoidNames
+        // Deduplication on output: if name collides, retry once with updated avoidNames & duplicateName prompt
         if (nameOrTitle && acceptedNames.has(nameOrTitle)) {
           item = (await generator.generate(params, {
             avoidNames: Array.from(acceptedNames),
             model,
+            temperature,
+            isBatch,
+            duplicateName: nameOrTitle,
           })) as T;
           nameOrTitle = getItemName(item);
         }

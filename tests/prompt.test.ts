@@ -106,6 +106,20 @@ describe("Prompt builder module", () => {
       expect(prompt).toContain("- note: string (optional) - Optional note");
       expect(prompt).toContain("- active: boolean - Is active");
     });
+
+    it("includes Variety requirements block ONLY during batch (isBatch: true or avoidNames present)", () => {
+      const schema = z.object({ title: z.string() });
+
+      const singlePrompt = buildPrompt({ schema });
+      expect(singlePrompt).not.toContain("Variety requirements:");
+
+      const batchPrompt = buildPrompt({ schema, isBatch: true });
+      expect(batchPrompt).toContain("Variety requirements:");
+      expect(batchPrompt).toContain("Vary tone, description structure, names, and reward values WITHIN allowed ranges.");
+
+      const avoidPrompt = buildPrompt({ schema, avoidNames: ["Item 1"] });
+      expect(avoidPrompt).toContain("Variety requirements:");
+    });
   });
 
   describe("buildRepairPrompt", () => {

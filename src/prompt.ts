@@ -7,6 +7,7 @@ export interface BuildPromptOptions {
   params?: Record<string, unknown>;
   avoidNames?: string[];
   systemPrompt?: string;
+  isBatch?: boolean;
 }
 
 export function describeZodType(type: z.ZodTypeAny, indentLevel = 0): string {
@@ -102,6 +103,15 @@ export function buildPrompt(options: BuildPromptOptions): string {
     );
   }
 
+  if (options.isBatch || (options.avoidNames && options.avoidNames.length > 0)) {
+    parts.push(
+      "Variety requirements:\n" +
+        "- Vary tone, description structure, names, and reward values WITHIN allowed ranges.\n" +
+        "- Avoid repetitive or templated opening phrases; ensure every item description starts differently.\n" +
+        "- Do not give identical reward values or stats across generated items."
+    );
+  }
+
   return parts.join("\n\n");
 }
 
@@ -120,6 +130,9 @@ export function buildRepairPrompt(options: BuildRepairPromptOptions): string {
 
   parts.push("Validation issues to fix:");
   const issueLines = options.issues.map((issue) => {
+    if (issue.rule === "duplicate") {
+      return `- The title/name '${issue.currentValue}' is already taken. Choose a completely different name and setting.`;
+    }
     const allowedStr =
       issue.allowed === undefined ? "undefined" : JSON.stringify(issue.allowed);
     const valueStr =

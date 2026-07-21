@@ -71,11 +71,15 @@ export interface DefineGeneratorOptions<T extends z.ZodTypeAny = z.ZodTypeAny> {
   model?: LanguageModel;
   systemPrompt?: string;
   maxRepairs?: number;
+  temperature?: number;
 }
 
 export interface GenerateOptions {
   model?: LanguageModel;
   avoidNames?: string[];
+  temperature?: number;
+  isBatch?: boolean;
+  duplicateName?: string;
 }
 
 export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
@@ -92,16 +96,36 @@ export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
       );
     }
 
+    const activeTemperature = opts?.temperature ?? this.options.temperature;
     const safeParams = params ?? {};
     const maxRepairs = this.options.maxRepairs ?? 3;
 
-    let currentPrompt = buildPrompt({
-      schema: this.options.schema,
-      examples: this.options.examples,
-      params: safeParams,
-      avoidNames: opts?.avoidNames,
-      systemPrompt: this.options.systemPrompt,
-    });
+    let currentPrompt = opts?.duplicateName
+      ? buildRepairPrompt({
+          schema: this.options.schema,
+          examples: this.options.examples,
+          params: safeParams,
+          avoidNames: opts?.avoidNames,
+          systemPrompt: this.options.systemPrompt,
+          isBatch: opts?.isBatch,
+          previousObject: { name: opts.duplicateName, title: opts.duplicateName },
+          issues: [
+            {
+              path: "(root)",
+              rule: "duplicate",
+              currentValue: opts.duplicateName,
+              allowed: "Unique item name/title",
+            },
+          ],
+        })
+      : buildPrompt({
+          schema: this.options.schema,
+          examples: this.options.examples,
+          params: safeParams,
+          avoidNames: opts?.avoidNames,
+          systemPrompt: this.options.systemPrompt,
+          isBatch: opts?.isBatch,
+        });
 
     let totalAttempts = 0;
     let lastObject: unknown = undefined;
@@ -115,6 +139,7 @@ export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
           model: activeModel,
           schema: this.options.schema,
           prompt: currentPrompt,
+          ...(activeTemperature !== undefined ? { temperature: activeTemperature } : {}),
         });
 
         lastObject = result.object;
@@ -207,6 +232,7 @@ export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
           params: safeParams,
           avoidNames: opts?.avoidNames,
           systemPrompt: this.options.systemPrompt,
+          isBatch: opts?.isBatch,
           previousObject: lastObject,
           issues: lastIssues,
         });
