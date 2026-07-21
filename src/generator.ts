@@ -1,5 +1,6 @@
 import { generateObject, NoObjectGeneratedError, type LanguageModel } from "ai";
 import { z } from "zod";
+import { generateBatch, type GenerateBatchOptions, type BatchResult } from "./batch.js";
 import { getByPath, validateConstraints } from "./constraints.js";
 import { buildPrompt, buildRepairPrompt } from "./prompt.js";
 import { Constraint, ValidationIssue } from "./types.js";
@@ -197,6 +198,15 @@ export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
       lastObject,
       errors: lastIssues,
     });
+  }
+
+  async generateBatch(
+    options: GenerateBatchOptions
+  ): Promise<BatchResult<z.infer<T>>> {
+    return generateBatch<z.infer<T>>(
+      this as unknown as Generator<z.ZodTypeAny>,
+      options
+    );
   }
 }
 
