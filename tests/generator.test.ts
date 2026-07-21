@@ -221,6 +221,49 @@ describe("Generator module", () => {
       expect(thirdCallPrompt).toContain("500");
     });
 
+    it("repair prompt contains full base prompt options (systemPrompt, schema, params, avoidNames, examples)", async () => {
+      const promptsReceived: string[] = [];
+      const mockModel = new MockLanguageModelV1({
+        defaultObjectGenerationMode: "json",
+        doGenerate: async (options) => {
+          promptsReceived.push(JSON.stringify(options.prompt));
+          return {
+            rawCall: { rawPrompt: null, rawSettings: {} },
+            finishReason: "stop",
+            usage: { promptTokens: 10, completionTokens: 20 },
+            text: JSON.stringify({ title: "Quest 1", level: 99 }),
+          };
+        },
+      });
+
+      const generator = defineGenerator({
+        schema: z.object({
+          title: z.string().describe("Title of quest"),
+          level: z.number().describe("Level requirement"),
+        }),
+        systemPrompt: "You are a RPG generator.",
+        examples: [{ title: "Ex 1", level: 1 }],
+        constraints: [range("level", [1, 10])],
+        model: mockModel,
+        maxRepairs: 1,
+      });
+
+      try {
+        await generator.generate({ theme: "dark" }, { avoidNames: ["AvoidQuest"] });
+      } catch {
+        // expected to throw GenerationError
+      }
+
+      expect(promptsReceived).toHaveLength(2);
+      const repairPrompt = promptsReceived[1];
+      expect(repairPrompt).toContain("You are a RPG generator.");
+      expect(repairPrompt).toContain("Field instructions:");
+      expect(repairPrompt).toContain("Generation parameters: theme=dark");
+      expect(repairPrompt).toContain("Already generated, do NOT repeat or closely imitate: AvoidQuest");
+      expect(repairPrompt).toContain("Examples of valid objects:");
+      expect(repairPrompt).toContain("The previously generated object was invalid.");
+    });
+
     it("disables repair loop when maxRepairs: 0", async () => {
       let callCount = 0;
       const mockModel = new MockLanguageModelV1({
@@ -254,6 +297,43 @@ describe("Generator module", () => {
         const genErr = err as GenerationError;
         expect(genErr.attempts).toBe(1);
         expect(callCount).toBe(1);
+      }
+    });
+  });
+
+  describe("constraint error handling", () => {
+    it("catches exception inside constraint function and turns it into constraint_error issue", async () => {
+      const mockModel = new MockLanguageModelV1({
+        defaultObjectGenerationMode: "json",
+        doGenerate: async () => ({
+          rawCall: { rawPrompt: null, rawSettings: {} },
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 20 },
+          text: JSON.stringify({ title: "Quest 1", level: 5 }),
+        }),
+      });
+
+      const throwingConstraint = (_obj: unknown, params?: Record<string, unknown>) => {
+        // Explicitly throw TypeError if level is accessed on null/undefined
+        const p = params as { sub: { level: number } };
+        return p.sub.level > 0 ? null : null;
+      };
+
+      const generator = defineGenerator({
+        schema: z.object({ title: z.string(), level: z.number() }),
+        constraints: [throwingConstraint],
+        model: mockModel,
+        maxRepairs: 0,
+      });
+
+      try {
+        await generator.generate();
+        expect.fail("Should have thrown GenerationError");
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(GenerationError);
+        const genErr = err as GenerationError;
+        expect(genErr.errors[0]?.rule).toBe("constraint_error");
+        expect(genErr.errors[0]?.path).toBe("(root)");
       }
     });
   });

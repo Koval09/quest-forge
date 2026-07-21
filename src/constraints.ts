@@ -25,12 +25,12 @@ export function getByPath(
   return { exists: true, value: current };
 }
 
-export type RangeBounds =
+export type RangeBounds<T = unknown> =
   | [number, number]
-  | ((obj: unknown, params?: Record<string, unknown>) => [number, number]);
+  | ((obj: T, params?: Record<string, unknown>) => [number, number]);
 
-export function range(path: string, bounds: RangeBounds): Constraint {
-  return (obj: unknown, params?: Record<string, unknown>): ValidationIssue | null => {
+export function range<T = unknown>(path: string, bounds: RangeBounds<T>): Constraint<T> {
+  return (obj: T, params?: Record<string, unknown>): ValidationIssue | null => {
     const computedBounds =
       typeof bounds === "function" ? bounds(obj, params) : bounds;
 
@@ -63,12 +63,12 @@ export function range(path: string, bounds: RangeBounds): Constraint {
   };
 }
 
-export type OneOfValues =
+export type OneOfValues<T = unknown> =
   | unknown[]
-  | ((obj: unknown, params?: Record<string, unknown>) => unknown[]);
+  | ((obj: T, params?: Record<string, unknown>) => unknown[]);
 
-export function oneOf(path: string, values: OneOfValues): Constraint {
-  return (obj: unknown, params?: Record<string, unknown>): ValidationIssue | null => {
+export function oneOf<T = unknown>(path: string, values: OneOfValues<T>): Constraint<T> {
+  return (obj: T, params?: Record<string, unknown>): ValidationIssue | null => {
     const computedValues =
       typeof values === "function" ? values(obj, params) : values;
 
@@ -96,17 +96,17 @@ export function oneOf(path: string, values: OneOfValues): Constraint {
   };
 }
 
-export type CustomCheckFn = (
-  obj: unknown,
+export type CustomCheckFn<T = unknown> = (
+  obj: T,
   params?: Record<string, unknown>
 ) => string | null;
 
-export function custom(fn: CustomCheckFn): Constraint {
-  return (obj: unknown, params?: Record<string, unknown>): ValidationIssue | null => {
+export function custom<T = unknown>(fn: CustomCheckFn<T>): Constraint<T> {
+  return (obj: T, params?: Record<string, unknown>): ValidationIssue | null => {
     const errorMessage = fn(obj, params);
     if (errorMessage !== null) {
       return {
-        path: "",
+        path: "(root)",
         rule: "custom",
         currentValue: obj,
         allowed: errorMessage,
@@ -124,13 +124,23 @@ export function validateConstraints(
   const issues: ValidationIssue[] = [];
 
   for (const constraint of constraints) {
-    const result = constraint(obj, params);
-    if (result !== null) {
-      if (Array.isArray(result)) {
-        issues.push(...result);
-      } else {
-        issues.push(result);
+    try {
+      const result = constraint(obj, params);
+      if (result !== null) {
+        if (Array.isArray(result)) {
+          issues.push(...result);
+        } else {
+          issues.push(result);
+        }
       }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      issues.push({
+        path: "(root)",
+        rule: "constraint_error",
+        currentValue: obj,
+        allowed: msg,
+      });
     }
   }
 

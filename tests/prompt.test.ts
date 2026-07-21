@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { buildPrompt, buildRepairPrompt, ValidationIssue } from "../src/index.js";
+import { buildPrompt, buildRepairPrompt } from "../src/prompt.js";
+import { ValidationIssue } from "../src/types.js";
 
 describe("Prompt builder module", () => {
   describe("buildPrompt", () => {
@@ -75,6 +76,36 @@ describe("Prompt builder module", () => {
         true
       );
     });
+
+    it("formats empty schema z.object({}) as (empty schema)", () => {
+      const schema = z.object({});
+      const prompt = buildPrompt({ schema });
+      expect(prompt).toContain("Field instructions:\n(empty schema)");
+    });
+
+    it("formats fields without .describe()", () => {
+      const schema = z.object({
+        count: z.number(),
+      });
+      const prompt = buildPrompt({ schema });
+      expect(prompt).toContain("- count: number");
+    });
+
+    it("formats ZodEnum, ZodArray, ZodOptional, and ZodDefault properly", () => {
+      const schema = z.object({
+        role: z.enum(["warrior", "mage"]).describe("Role type"),
+        tags: z.array(z.string()).describe("Tag list"),
+        note: z.string().optional().describe("Optional note"),
+        active: z.boolean().default(true).describe("Is active"),
+      });
+
+      const prompt = buildPrompt({ schema });
+
+      expect(prompt).toContain("- role: enum(warrior | mage) - Role type");
+      expect(prompt).toContain("- tags: array of string - Tag list");
+      expect(prompt).toContain("- note: string (optional) - Optional note");
+      expect(prompt).toContain("- active: boolean - Is active");
+    });
   });
 
   describe("buildRepairPrompt", () => {
@@ -100,7 +131,8 @@ describe("Prompt builder module", () => {
         },
       ];
 
-      const repairPrompt = buildRepairPrompt({ previousObject, issues });
+      const schema = z.object({ name: z.string(), level: z.number(), rarity: z.string() });
+      const repairPrompt = buildRepairPrompt({ schema, previousObject, issues });
 
       expect(repairPrompt).toContain("The previously generated object was invalid.");
       expect(repairPrompt).toContain('"name": "Test Quest"');

@@ -2,9 +2,15 @@
 
 > Schema-first game content generator powered by Vercel AI SDK, Zod, and balance constraints.
 
-![quest-forge Demo Placeholder](https://raw.githubusercontent.com/Koval09/quest-forge/main/assets/demo.gif)
+<!-- ![quest-forge Demo Placeholder](https://raw.githubusercontent.com/Koval09/quest-forge/main/assets/demo.gif) TODO: add GIF -->
 
 `quest-forge` helps game developers define structured content (quests, items, NPCs) as Zod schemas with balance constraints. It generates batches of valid objects via the Vercel AI SDK `generateObject`, featuring automatic validation and an iterative repair loop on errors.
+
+---
+
+## Security Note
+
+> **Warning**: `--schema` executes the file as code, only point it at files you trust.
 
 ---
 
@@ -112,7 +118,10 @@ if (failures.length > 0) {
 
 Example nested path constraint:
 ```typescript
-range("reward.gold", (obj, params) => [params.level * 10, params.level * 50])
+range("reward.gold", (_obj, params) => [
+  ((params?.level as number) ?? 1) * 10,
+  ((params?.level as number) ?? 1) * 50,
+])
 ```
 
 ---

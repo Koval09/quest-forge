@@ -39,13 +39,27 @@ export function convertZodErrorToIssues(
   rawObject: unknown
 ): ValidationIssue[] {
   return zodError.issues.map((issue) => {
-    const pathStr = issue.path.join(".");
-    const { value } = getByPath(rawObject, pathStr);
+    const pathStr = issue.path.length === 0 ? "(root)" : issue.path.join(".");
+    const { value } = getByPath(rawObject, pathStr === "(root)" ? "" : pathStr);
+
+    let allowed: unknown = issue.message;
+    if (issue.code === "invalid_type") {
+      allowed = (issue as z.ZodInvalidTypeIssue).expected;
+    } else if (issue.code === "too_small") {
+      const smallIssue = issue as z.ZodTooSmallIssue;
+      allowed = { min: smallIssue.minimum, inclusive: smallIssue.inclusive };
+    } else if (issue.code === "too_big") {
+      const bigIssue = issue as z.ZodTooBigIssue;
+      allowed = { max: bigIssue.maximum, inclusive: bigIssue.inclusive };
+    } else if (issue.code === "invalid_enum_value") {
+      allowed = (issue as z.ZodInvalidEnumValueIssue).options;
+    }
+
     return {
       path: pathStr,
       rule: issue.code,
       currentValue: value,
-      allowed: issue.message,
+      allowed,
     };
   });
 }
@@ -53,7 +67,7 @@ export function convertZodErrorToIssues(
 export interface DefineGeneratorOptions<T extends z.ZodTypeAny = z.ZodTypeAny> {
   schema: T;
   constraints?: Constraint<z.infer<T>>[];
-  examples?: unknown[];
+  examples?: Array<Partial<z.infer<T>>>;
   model?: LanguageModel;
   systemPrompt?: string;
   maxRepairs?: number;
@@ -78,12 +92,13 @@ export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
       );
     }
 
+    const safeParams = params ?? {};
     const maxRepairs = this.options.maxRepairs ?? 3;
 
     let currentPrompt = buildPrompt({
       schema: this.options.schema,
       examples: this.options.examples,
-      params,
+      params: safeParams,
       avoidNames: opts?.avoidNames,
       systemPrompt: this.options.systemPrompt,
     });
@@ -111,7 +126,7 @@ export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
           const constraintIssues = validateConstraints(
             parsed.data,
             (this.options.constraints as Constraint[]) || [],
-            params
+            safeParams
           );
 
           if (constraintIssues.length === 0) {
@@ -159,7 +174,7 @@ export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
           } else {
             lastIssues = [
               {
-                path: "",
+                path: "(root)",
                 rule: "no_object_generated",
                 currentValue: lastObject,
                 allowed: err.message,
@@ -187,6 +202,11 @@ export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
 
       if (repairAttempt < maxRepairs) {
         currentPrompt = buildRepairPrompt({
+          schema: this.options.schema,
+          examples: this.options.examples,
+          params: safeParams,
+          avoidNames: opts?.avoidNames,
+          systemPrompt: this.options.systemPrompt,
           previousObject: lastObject,
           issues: lastIssues,
         });
@@ -203,10 +223,7 @@ export class Generator<T extends z.ZodTypeAny = z.ZodTypeAny> {
   async generateBatch(
     options: GenerateBatchOptions
   ): Promise<BatchResult<z.infer<T>>> {
-    return generateBatch<z.infer<T>>(
-      this as unknown as Generator<z.ZodTypeAny>,
-      options
-    );
+    return generateBatch<z.infer<T>>(this, options);
   }
 }
 

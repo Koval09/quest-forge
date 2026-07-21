@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { oneOf, range } from "../src/index.js";
+import { oneOf, range } from "quest-forge";
 
 export const questSchema = z.object({
   title: z.string().describe("Descriptive title of the fantasy quest"),

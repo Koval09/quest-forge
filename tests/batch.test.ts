@@ -184,4 +184,141 @@ describe("Batch generation module", () => {
     expect(maxActiveTasks).toBeLessThanOrEqual(2);
     expect(maxActiveTasks).toBe(2);
   });
+
+  it("retries once when a duplicate name is produced, and marks failure if still duplicate", async () => {
+    let callCount = 0;
+    const mockModel = new MockLanguageModelV1({
+      defaultObjectGenerationMode: "json",
+      doGenerate: async () => {
+        callCount++;
+        // Always returns "Same Name"
+        return {
+          rawCall: { rawPrompt: null, rawSettings: {} },
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 20 },
+          text: JSON.stringify({ name: "Same Name", level: 5 }),
+        };
+      },
+    });
+
+    const generator = defineGenerator({
+      schema: z.object({ name: z.string(), level: z.number() }),
+      model: mockModel,
+    });
+
+    const result = await generator.generateBatch({ count: 2, concurrency: 1 });
+
+    // Item 1 succeeds with "Same Name"
+    // Item 2 produces "Same Name", retries once with "Same Name", still duplicate -> recorded in failures
+    expect(callCount).toBe(3);
+    expect(result.items).toHaveLength(1);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]?.errors[0]?.rule).toBe("duplicate");
+  });
+
+  it("preserves item order by task index even if tasks complete out of order", async () => {
+    let callCount = 0;
+    const mockModel = new MockLanguageModelV1({
+      defaultObjectGenerationMode: "json",
+      doGenerate: async () => {
+        callCount++;
+        const current = callCount;
+        if (current === 1) {
+          // First task takes longer
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        return {
+          rawCall: { rawPrompt: null, rawSettings: {} },
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 20 },
+          text: JSON.stringify({ name: `Item ${current}`, level: current }),
+        };
+      },
+    });
+
+    const generator = defineGenerator({
+      schema: z.object({ name: z.string(), level: z.number() }),
+      model: mockModel,
+    });
+
+    const result = await generator.generateBatch({ count: 2, concurrency: 2 });
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]?.name).toBe("Item 1");
+    expect(result.items[1]?.name).toBe("Item 2");
+  });
+
+  it("handles onProgress callback throwing an exception gracefully without crashing batch", async () => {
+    let callCount = 0;
+    const mockModel = new MockLanguageModelV1({
+      defaultObjectGenerationMode: "json",
+      doGenerate: async () => {
+        callCount++;
+        return {
+          rawCall: { rawPrompt: null, rawSettings: {} },
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 20 },
+          text: JSON.stringify({ name: `Quest ${callCount}`, level: 5 }),
+        };
+      },
+    });
+
+    const generator = defineGenerator({
+      schema: z.object({ name: z.string(), level: z.number() }),
+      model: mockModel,
+    });
+
+    const result = await generator.generateBatch({
+      count: 3,
+      concurrency: 2,
+      onProgress: () => {
+        throw new Error("Progress callback crashed!");
+      },
+    });
+
+    expect(result.items).toHaveLength(3);
+  });
+
+  it("validates concurrency parameter and throws error for non-integer or < 1", async () => {
+    const generator = defineGenerator({
+      schema: z.object({ name: z.string() }),
+    });
+
+    await expect(generator.generateBatch({ count: 5, concurrency: 0 })).rejects.toThrow(
+      'Option "concurrency" must be an integer >= 1'
+    );
+
+    await expect(generator.generateBatch({ count: 5, concurrency: -1 })).rejects.toThrow(
+      'Option "concurrency" must be an integer >= 1'
+    );
+
+    await expect(generator.generateBatch({ count: 5, concurrency: 1.5 })).rejects.toThrow(
+      'Option "concurrency" must be an integer >= 1'
+    );
+  });
+
+  it("handles a large batch of count: 1000 items efficiently", async () => {
+    let callCount = 0;
+    const mockModel = new MockLanguageModelV1({
+      defaultObjectGenerationMode: "json",
+      doGenerate: async () => {
+        callCount++;
+        return {
+          rawCall: { rawPrompt: null, rawSettings: {} },
+          finishReason: "stop",
+          usage: { promptTokens: 5, completionTokens: 10 },
+          text: JSON.stringify({ name: `Item ${callCount}`, level: 1 }),
+        };
+      },
+    });
+
+    const generator = defineGenerator({
+      schema: z.object({ name: z.string(), level: z.number() }),
+      model: mockModel,
+    });
+
+    const result = await generator.generateBatch({ count: 1000, concurrency: 50 });
+
+    expect(result.items).toHaveLength(1000);
+    expect(result.failures).toHaveLength(0);
+  });
 });

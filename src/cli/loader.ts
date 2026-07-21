@@ -1,5 +1,7 @@
 import { createJiti } from "jiti";
+import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { Constraint } from "../types.js";
 
@@ -9,13 +11,32 @@ export interface LoadedSchemaModule {
   examples?: unknown[];
 }
 
+function getDirname(): string {
+  if (typeof __dirname !== "undefined") {
+    return __dirname;
+  }
+  try {
+    return path.dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return process.cwd();
+  }
+}
+
 export async function loadSchemaFile(filePath: string): Promise<LoadedSchemaModule> {
   const absolutePath = path.resolve(process.cwd(), filePath);
-  const parentUrl =
-    typeof import.meta !== "undefined" && import.meta.url
-      ? import.meta.url
-      : __filename;
-  const jiti = createJiti(parentUrl);
+  const currentDir = getDirname();
+
+  const packageIndexPath = fs.existsSync(path.resolve(currentDir, "../index.ts"))
+    ? path.resolve(currentDir, "../index.ts")
+    : fs.existsSync(path.resolve(currentDir, "../../src/index.ts"))
+      ? path.resolve(currentDir, "../../src/index.ts")
+      : path.resolve(currentDir, "../index.js");
+
+  const jiti = createJiti(currentDir, {
+    alias: {
+      "quest-forge": packageIndexPath,
+    },
+  });
 
   let moduleExports: unknown;
   try {

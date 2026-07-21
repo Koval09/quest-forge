@@ -120,7 +120,7 @@ describe("Constraints module", () => {
       const invalid = validateConstraints(invalidObj, [constraint]);
       expect(invalid).toEqual([
         {
-          path: "",
+          path: "(root)",
           rule: "custom",
           currentValue: invalidObj,
           allowed: "Recommended level cannot be lower than required level",

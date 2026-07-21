@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { custom, oneOf, range } from "../src/index.js";
+import { custom, oneOf, range } from "quest-forge";
 
 export const npcSchema = z.object({
   name: z.string().describe("Unique full name of the NPC"),

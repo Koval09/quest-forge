@@ -63,6 +63,14 @@ describe("CLI module", () => {
       expect(typeof loaded.schema.safeParse).toBe("function");
     });
 
+    it("successfully loads schema importing from 'quest-forge' package alias", async () => {
+      const fixturePath = path.join(__dirname, "fixtures", "import-package.schema.ts");
+      const loaded = await loadSchemaFile(fixturePath);
+
+      expect(loaded.schema).toBeDefined();
+      expect(loaded.constraints).toHaveLength(1);
+    });
+
     it("throws clear error on broken schema fixture missing valid Zod schema", async () => {
       const fixturePath = path.join(__dirname, "fixtures", "broken.schema.ts");
 
@@ -90,6 +98,125 @@ describe("CLI module", () => {
       expect(() => resolveModel("google:gemini-1.5-pro")).toThrow(
         'Unsupported provider "google"'
       );
+    });
+  });
+
+  describe("runGenerateAction (CLI action)", () => {
+    it("writes output to file when --out option is provided", async () => {
+      const { MockLanguageModelV1 } = await import("ai/test");
+      const fs = await import("node:fs");
+      const os = await import("node:os");
+
+      let callCount = 0;
+      const mockModel = new MockLanguageModelV1({
+        defaultObjectGenerationMode: "json",
+        doGenerate: async () => {
+          callCount++;
+          return {
+            rawCall: { rawPrompt: null, rawSettings: {} },
+            finishReason: "stop",
+            usage: { promptTokens: 10, completionTokens: 20 },
+            text: JSON.stringify({ name: `Quest ${callCount}`, level: 5 }),
+          };
+        },
+      });
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "quest-forge-test-"));
+      const outPath = path.join(tempDir, "output.json");
+      const schemaPath = path.join(__dirname, "fixtures", "valid.schema.ts");
+
+      const { runGenerateAction } = await import("../src/cli/generate.js");
+
+      await runGenerateAction(
+        {
+          schema: schemaPath,
+          count: 2,
+          concurrency: 1,
+          out: outPath,
+        },
+        mockModel
+      );
+
+      expect(fs.existsSync(outPath)).toBe(true);
+      const content = JSON.parse(fs.readFileSync(outPath, "utf-8"));
+      expect(content).toHaveLength(2);
+      expect(content[0].name).toBe("Quest 1");
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it("outputs JSON to stdout when --out is omitted", async () => {
+      const { MockLanguageModelV1 } = await import("ai/test");
+      const mockModel = new MockLanguageModelV1({
+        defaultObjectGenerationMode: "json",
+        doGenerate: async () => ({
+          rawCall: { rawPrompt: null, rawSettings: {} },
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 20 },
+          text: JSON.stringify({ name: "Stdout Quest", level: 5 }),
+        }),
+      });
+
+      const schemaPath = path.join(__dirname, "fixtures", "valid.schema.ts");
+      const { runGenerateAction } = await import("../src/cli/generate.js");
+
+      let stdoutText = "";
+      const originalStdoutWrite = process.stdout.write;
+      process.stdout.write = (chunk: unknown) => {
+        stdoutText += String(chunk);
+        return true;
+      };
+
+      try {
+        await runGenerateAction(
+          {
+            schema: schemaPath,
+            count: 1,
+            concurrency: 1,
+          },
+          mockModel
+        );
+      } finally {
+        process.stdout.write = originalStdoutWrite;
+      }
+
+      const parsed = JSON.parse(stdoutText);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].name).toBe("Stdout Quest");
+    });
+
+    it("sets process.exitCode = 1 when all batch items fail generation", async () => {
+      const { MockLanguageModelV1 } = await import("ai/test");
+      const mockModel = new MockLanguageModelV1({
+        defaultObjectGenerationMode: "json",
+        doGenerate: async () => ({
+          rawCall: { rawPrompt: null, rawSettings: {} },
+          finishReason: "stop",
+          usage: { promptTokens: 10, completionTokens: 20 },
+          text: JSON.stringify({ title: "Quest", level: 999 }), // fails range [1, 10] constraint
+        }),
+      });
+
+      const schemaPath = path.join(__dirname, "fixtures", "import-package.schema.ts");
+      const { runGenerateAction } = await import("../src/cli/generate.js");
+
+      const originalExitCode = process.exitCode;
+      process.exitCode = undefined;
+
+      try {
+        await runGenerateAction(
+          {
+            schema: schemaPath,
+            count: 2,
+            concurrency: 1,
+          },
+          mockModel
+        );
+
+        expect(process.exitCode).toBe(1);
+      } finally {
+        process.exitCode = originalExitCode;
+      }
     });
   });
 });

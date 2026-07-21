@@ -69,7 +69,7 @@ export function formatSchemaFields(schema: z.ZodTypeAny): string {
       const fieldDesc = describeZodType(value as z.ZodTypeAny, 0);
       lines.push(`- ${key}: ${fieldDesc}`);
     }
-    return lines.join("\n");
+    return lines.length > 0 ? lines.join("\n") : "(empty schema)";
   }
   return describeZodType(schema, 0);
 }
@@ -105,13 +105,14 @@ export function buildPrompt(options: BuildPromptOptions): string {
   return parts.join("\n\n");
 }
 
-export interface BuildRepairPromptOptions {
+export interface BuildRepairPromptOptions extends BuildPromptOptions {
   previousObject: unknown;
   issues: ValidationIssue[];
 }
 
 export function buildRepairPrompt(options: BuildRepairPromptOptions): string {
-  const parts: string[] = [];
+  const basePrompt = buildPrompt(options);
+  const parts: string[] = [basePrompt];
 
   parts.push("The previously generated object was invalid.");
 
@@ -126,7 +127,7 @@ export function buildRepairPrompt(options: BuildRepairPromptOptions): string {
         ? "undefined"
         : JSON.stringify(issue.currentValue);
 
-    return `- Field "${issue.path || "root"}" violated rule "${issue.rule}": current value is ${valueStr}, allowed: ${allowedStr}`;
+    return `- Field "${issue.path || "(root)"}" violated rule "${issue.rule}": current value is ${valueStr}, allowed: ${allowedStr}`;
   });
 
   parts.push(issueLines.join("\n"));

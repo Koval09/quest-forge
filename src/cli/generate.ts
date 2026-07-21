@@ -1,3 +1,4 @@
+import type { LanguageModel } from "ai";
 import { Command, InvalidArgumentError } from "commander";
 import fs from "node:fs";
 import path from "node:path";
@@ -60,6 +61,69 @@ export interface CLIGenerateOptions {
   concurrency: number;
 }
 
+export async function runGenerateAction(
+  options: CLIGenerateOptions,
+  overrideModel?: LanguageModel
+): Promise<void> {
+  try {
+    const schemaModule = await loadSchemaFile(options.schema);
+
+    let model = overrideModel;
+    if (!model && options.model) {
+      model = resolveModel(options.model);
+    }
+
+    const generator = defineGenerator({
+      schema: schemaModule.schema,
+      constraints: schemaModule.constraints,
+      examples: schemaModule.examples as unknown as Array<Partial<unknown>>,
+      model,
+    });
+
+    const batchResult = await generator.generateBatch({
+      count: options.count,
+      concurrency: options.concurrency,
+      params: options.param,
+      onProgress: ({ completed, total }) => {
+        process.stderr.write(`Generated ${completed}/${total}...\r`);
+      },
+    });
+
+    process.stderr.write("\n");
+
+    const jsonOutput = JSON.stringify(batchResult.items, null, 2);
+
+    if (options.out) {
+      const absoluteOutPath = path.resolve(process.cwd(), options.out);
+      fs.mkdirSync(path.dirname(absoluteOutPath), { recursive: true });
+      fs.writeFileSync(absoluteOutPath, jsonOutput, "utf-8");
+      process.stderr.write(`Wrote ${batchResult.items.length} items to ${options.out}\n`);
+    } else {
+      process.stdout.write(jsonOutput + "\n");
+    }
+
+    if (batchResult.failures.length > 0) {
+      process.stderr.write(
+        `Warning: ${batchResult.failures.length} of ${options.count} items failed generation.\n`
+      );
+      for (const failure of batchResult.failures) {
+        process.stderr.write(
+          ` - Item #${failure.index}: ${JSON.stringify(failure.errors)}\n`
+        );
+      }
+    }
+
+    if (batchResult.items.length === 0 && options.count > 0) {
+      process.stderr.write("Error: All batch items failed generation.\n");
+      process.exitCode = 1;
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`Error: ${msg}\n`);
+    process.exitCode = 1;
+  }
+}
+
 export function createGenerateCommand(): Command {
   const cmd = new Command("generate");
 
@@ -87,63 +151,7 @@ export function createGenerateCommand(): Command {
       3
     )
     .action(async (options: CLIGenerateOptions) => {
-      try {
-        const schemaModule = await loadSchemaFile(options.schema);
-
-        let model = undefined;
-        if (options.model) {
-          model = resolveModel(options.model);
-        }
-
-        const generator = defineGenerator({
-          schema: schemaModule.schema,
-          constraints: schemaModule.constraints,
-          examples: schemaModule.examples,
-          model,
-        });
-
-        const batchResult = await generator.generateBatch({
-          count: options.count,
-          concurrency: options.concurrency,
-          params: options.param,
-          onProgress: ({ completed, total }) => {
-            process.stderr.write(`Generated ${completed}/${total}...\r`);
-          },
-        });
-
-        process.stderr.write("\n");
-
-        const jsonOutput = JSON.stringify(batchResult.items, null, 2);
-
-        if (options.out) {
-          const absoluteOutPath = path.resolve(process.cwd(), options.out);
-          fs.mkdirSync(path.dirname(absoluteOutPath), { recursive: true });
-          fs.writeFileSync(absoluteOutPath, jsonOutput, "utf-8");
-          process.stderr.write(`Wrote ${batchResult.items.length} items to ${options.out}\n`);
-        } else {
-          process.stdout.write(jsonOutput + "\n");
-        }
-
-        if (batchResult.failures.length > 0) {
-          process.stderr.write(
-            `Warning: ${batchResult.failures.length} of ${options.count} items failed generation.\n`
-          );
-          for (const failure of batchResult.failures) {
-            process.stderr.write(
-              ` - Item #${failure.index}: ${JSON.stringify(failure.errors)}\n`
-            );
-          }
-        }
-
-        if (batchResult.items.length === 0 && options.count > 0) {
-          process.stderr.write("Error: All batch items failed generation.\n");
-          process.exitCode = 1;
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        process.stderr.write(`Error: ${msg}\n`);
-        process.exitCode = 1;
-      }
+      await runGenerateAction(options);
     });
 
   return cmd;
